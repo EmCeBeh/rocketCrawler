@@ -3,18 +3,19 @@
 """
 Created Spring 2020
 
-@authors:   Martin Borchert martin.borchert@mbi-berlin.de
-            Kathinka Gerlinger kathinka.gerlinger@mbi-berlin.de            
+@authors:   Martin Borchert martin.borchert@mbi-berlin.de (MB)
+            Kathinka Gerlinger kathinka.gerlinger@mbi-berlin.de (KG)
+Copied some things from Michael Schneider's wikiupload.py (MS)
 """
 
 from numpy import *
 import datetime
 import requests as req
-import mwclient
 
+import mwclient
 from os import path, linesep
 import tkinter
-from tkinter.filedialog import askopenfilenames
+from tkinter.filedialog import asksaveasfilename
 from tkinter.simpledialog import askstring
 from tkinter.messagebox import showinfo
 from tkinter.simpledialog import Dialog
@@ -27,17 +28,24 @@ class rocketCrawler(object):
 
         Args:
             server (str)    : Server URL, default = https://chat.gwdg.de
+        ----
+        @MB, KG
         """
+        self.root = tkinter.Tk()
+        self.root.withdraw()
         self.baseUrl = server + '/api/v1'
         self.token = ''
         self.hds = {}
         self.history = {}
         self.files =  {}
         
-        self.login(verbose = True)
-        
     
     def get_user(self):
+        '''
+        get user name via GUI
+        ----
+        @MS
+        '''
         self.email = askstring('username', 'RocketChat username')
         if self.email is None:
             self.root.destroy()
@@ -45,6 +53,11 @@ class rocketCrawler(object):
             return
 
     def get_pass(self):
+        '''
+        get password via GUI (password not shown in clear)
+        ----
+        @MS
+        '''
         self.password = askstring('password', 'RocketChat password', show='*')
         if self.password is None:
             self.root.destroy()
@@ -52,6 +65,11 @@ class rocketCrawler(object):
         return
 
     def login(self, verbose = True):
+        '''
+        log into RocketChat
+        ----
+        @MB
+        '''
         data = {
             'user': self.email,
             'password': self.password,
@@ -81,6 +99,8 @@ class rocketCrawler(object):
 
         returns :
             a dict with: {Group name : unique group ID}
+        ----
+        @MB
         '''
         # Getting your personal groups
         grouplist = req.get(self.baseUrl+'/groups.list', headers=self.hds).json()
@@ -91,12 +111,23 @@ class rocketCrawler(object):
         print()
         return self.groups
 
-    def getHistory(self, nameOrID, getGroups = False, entries = 10000):
+    def get_groupID(self):
         '''
-        nameOrID  : Clear text room name or ID
-        getGroups : Calls self.getGroups to update the group dict with stored
-                    credentials. Not needed if function has already been
-                    executed manually.
+        print all groups into terminal and ask for group name with gui
+        ----
+        @KG
+        '''
+        _ = self.getGroups()
+        name = askstring('groupname', 'RocketChat group name')
+        if name is None:
+            self.root.destroy()
+            sys.exit("Aborted")
+        else:
+            self.ID = self.groups[name]
+        return
+
+    def getHistory(self, entries = 10000):
+        '''
         entries   : Number of most recent history entries to be requested.
                     Default is 10000. Could be limited by server!
                     If so, you need to implement your own loop
@@ -104,18 +135,11 @@ class rocketCrawler(object):
 
         returns:
             list of dict of history entries
+        ----
+        @MB
         '''
-        if getGroups:
-            _ = self.getGroups()
-
-        try:
-            # Try if a name is given, which exists in your groups
-            ID = self.groups[nameOrID]
-        except KeyError:
-            ID = nameOrID
-
         pars = {
-            'roomId': ID,
+            'roomId': self.ID,
             'count': entries,
         }
 
@@ -123,21 +147,17 @@ class rocketCrawler(object):
         # (tested up to 4000 only, depends on server.)
         hist = req.get(self.baseUrl+'/groups.history', headers=self.hds, params=pars)
         if hist.json()['success']:
-            self.history[ID] = hist.json()['messages']
+            self.history[self.ID] = hist.json()['messages']
         else:
             raise ValueError('Could not connect to group.'
                              'Either nameOrId or login credentials is incorrect.')
 
-        return self.history[ID]
+        return self.history[self.ID]
 
 
-    def getFileURLs(self, nameOrID, getGroups = False, entries = 100, cap = True):
+    def getFileURLs(self, entries = 100, cap = True):
         '''
-        nameOrID        : Clear text room name or ID
-        getGroups       : Calls self.getGroups to update the group dict with stored
-                          credentials. Not needed if function has already been
-                          executed manually.
-        historyEntries  : Number of most recent URLs to be requested. Default is
+        entries  : Number of most recent URLs to be requested. Default is
                           100. Could be limited by server for some reason...
                           => See moreThanAllowed if you get less than expected!
         cap             : If you want to request more than the allowed cap of
@@ -146,17 +166,9 @@ class rocketCrawler(object):
                           over all available files.
         returns:
             list of dict of fileURLs
+        ----
+        @MB
         '''
-
-        if getGroups:
-            _ = self.getGroups()
-        try:
-            # Try if a name is given, which exists in your groups
-            ID = self.groups[nameOrID]
-        except KeyError:
-            ID = nameOrID
-
-
         # Aparently some servers have `API_Upper_Count_Limit` set to
         # e.g. 100...why??? It's just text.
         # Setting count to e.g. >100 will still only give 100 file URLs!
@@ -167,7 +179,7 @@ class rocketCrawler(object):
         while remaining == entries:
             
             pars = {
-                'roomId': ID,
+                'roomId': self.ID,
                 'count': entries, 
                 'offset': offset,
             }
@@ -179,21 +191,23 @@ class rocketCrawler(object):
             else:
                 remaining = -1
             offset += entries
-        self.files[ID] = files
+        self.files[self.ID] = files
         return files
 
-    def _getURL(self, messagetime, ID):
+    def _getURL(self, messagetime):
 
         '''
         Get the URL for a given messagetime.
         Only to be automatically called by writeHistory2File!
+        ----
+        @MB
         '''
         # messagetime has format
         # YYYY-MM-DDTHH:MM:SS:MMMZ
         # and we only want
         # YYYY-MM-DDTHH:MM:SS
         messagetime = messagetime[:-5]
-        for file in self.files[ID]:
+        for file in self.files[self.ID]:
             #same for filetime
             filetime = file['uploadedAt'][:-5]
             a = datetime.datetime.strptime(filetime,    "%Y-%m-%dT%H:%M:%S")
@@ -206,7 +220,7 @@ class rocketCrawler(object):
                 # ideally one would check if there is more than one match and write both...
                 return file['url']
 
-    def writeHistory2File(self, groupName, saveName = None, verbose = True):
+    def writeHistory2File(self, saveName = None, verbose = True):
         '''
             Creates text file with messages and URLs to photos posted like:
 
@@ -223,8 +237,6 @@ class rocketCrawler(object):
 
             input:
 
-            groupName : A string with the group name or ID
-
             saveName  : Save name (optionally including path) for created file.
                         If left to None groupName.txt will be used.
             verbose   : If True, it prints:
@@ -238,19 +250,13 @@ class rocketCrawler(object):
             returns:
                 used saveName as string
         '''
-        
-        # Is groupName a valid name or was an ID given?
-        if groupName in self.groups.keys():
-            ID = self.groups[groupName]
-        else:
-            ID = groupName
         # Was a saveName provided?
         if saveName == None:
-            saveName = '%s.txt'%groupName
+            saveName = asksaveasfilename(title='Select file destination and name')
 
         # Open File
         f = open(saveName,'w')
-        f.write('Chat export for group %s.\n'%ID)
+        f.write('Chat export for group %s.\n'%self.ID)
 
         # Defining some variables
         last_sender = 'Nobody'
@@ -258,7 +264,7 @@ class rocketCrawler(object):
         counter_del = 0
         counter_char = 0
 
-        for message in self.history[ID][::-1]:
+        for message in self.history[self.ID][::-1]:
             name = message['u']['name']
             content = message['msg']
             dateAndTime = '%s %s'%(message['ts'][:10],message['ts'][11:-5])
@@ -270,7 +276,7 @@ class rocketCrawler(object):
             # Then an image was posted or the message was deleted.
             if len(content) == 0:
                 messagetime = message['ts']
-                URL = self._getURL(messagetime, ID)
+                URL = self._getURL(messagetime)
                 # Did we sucessfully find a image URL matching
                 # the time of the message?
                 if URL == None:
@@ -291,8 +297,23 @@ class rocketCrawler(object):
             last_sender = name
         if verbose:
             print('There were %d files in the chat.'
-                  'A file was assigned to %d messages'%(len(self.files[ID]),counter))
+                  'A file was assigned to %d messages'%(len(self.files[self.ID]),counter))
             print('For %d messages no file could be assigned.'
                   ' Probably the message was deleted.'%counter_del)
         f.close()
         return(saveName)
+
+if __name__ == "__main__":
+    if '--nocertcheck' in sys.argv[1:]:
+        import ssl
+#        if True:
+        if hasattr(ssl, '_create_unverified_context'):
+            ssl._create_default_https_context = ssl._create_unverified_context
+    g = rocketCrawler()
+    g.get_user()
+    g.get_pass()
+    g.login()
+    g.get_groupID()
+    g.getHistory()
+    g.getFileURLs()
+    g.writeHistory2File()
