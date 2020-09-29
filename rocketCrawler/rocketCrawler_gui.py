@@ -271,7 +271,7 @@ class rocketCrawler(object):
             # We want to summarise the consecutive messages per person
             # under one name (like in Rocket.Chat)
             if last_sender != name:                  
-                f.write('\n%s %s: \n'%(name,dateAndTime))
+                f.write('\n**%s %s:**\n\n'%(name,dateAndTime))
             # Is the message empty?
             # Then an image was posted or the message was deleted.
             if len(content) == 0:
@@ -280,15 +280,15 @@ class rocketCrawler(object):
                 # Did we sucessfully find a image URL matching
                 # the time of the message?
                 if URL == None:
-                    f.write('[Message deleted or file not found!]\n')
+                    f.write('[Message deleted or file not found!]\n\n')
                     counter_del += 1
                 else:
-                    f.write(URL+'\n')
+                    f.write(URL+'\n\n')
                     counter += 1
             # If there is a message we write it to file
             else:
                 try:
-                    f.write(content+'\n')
+                    f.write(content+'\n\n')
                 except Exception as e:
                     # Rocket.Chat emojis are encoded by :EMOJI_NAME:,
                     # others can't be written to file:
